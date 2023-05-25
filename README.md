@@ -108,16 +108,21 @@ docker run --rm -v $(pwd):/sm64 sm64_android sh -c "ln -nsf /SDL2-2.0.12/src /sm
 docker run --rm -v $(pwd):/sm64 sm64_android sh -c "ln -nsf /SDL2-2.0.12/include /sm64/app/jni/SDL/include"
 ```
 
-**Perform native build twice:**
+**Perform native build twice:**  
+`--jobs $(nproc)` will use all available CPU cores for faster compiling. If you want to use a specific number of cores, replace `$(nproc)` with the number of cores, such as `--jobs 4`.
 ```sh
-# if you have more cores available, you can increase the --jobs parameter
-docker run --rm -v $(pwd):/sm64 sm64_android sh -c "cd /sm64/app/jni/src && make --jobs 4"
-docker run --rm -v $(pwd):/sm64 sm64_android sh -c "cd /sm64/app/jni/src && make --jobs 4"
+docker run --rm -v $(pwd):/sm64 sm64_android sh -c "cd /sm64/app/jni/src && make --jobs $(nproc)"
+docker run --rm -v $(pwd):/sm64 sm64_android sh -c "cd /sm64/app/jni/src && make --jobs $(nproc)"
 ```
 
 **Perform Android build:**
 ```sh
-docker run --rm -v $(pwd):/sm64 sm64_android sh -c "./gradlew assembleDebug"
+docker run --rm -v $(pwd):/sm64 sm64_android sh -c "cp -r /usr/lib/android-sdk/platforms /usr/lib/android-sdk/ndk-bundle && ./gradlew assembleDebug"
+```
+
+**Optional, but recommended: Sign the APK:**
+```sh
+apksigner sign --cert ./app/jni/src/certificate.pem --key ./app/jni/src/key.pk8 ./app/build/outputs/apk/debug/app-debug.apk
 ```
 
 **Enjoy your apk:**
