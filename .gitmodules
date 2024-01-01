@@ -1,3 +1,0 @@
-[submodule "app/jni/src"]
-	path = app/jni/src
-	url = https://github.com/Samutz/sm64-port-android.git
