@@ -1,0 +1,294 @@
+diff --git a/Android.mk b/Android.mk
+index 5e5da57..3f37941 100644
+--- a/Android.mk
++++ b/Android.mk
+@@ -16,13 +16,13 @@ VERSION ?= us
+ TOUCH_CONTROLS ?= 1
+ 
+ # Disable text-based save-files by default
+-TEXTSAVES ?= 0
++TEXTSAVES ?= 1
+ 
+ # Enable extended options menu by default
+ EXT_OPTIONS_MENU ?= 1
+ 
+ # Load resources from external files
+-EXTERNAL_DATA ?= 0
++EXTERNAL_DATA ?= 1
+ BASEDIR ?= res
+ 
+ ifeq ($(VERSION),jp)
+@@ -46,7 +46,7 @@ endif
+ 
+ PC_BUILD_DIR := $(LOCAL_PATH)/build/$(VERSION)_pc
+ 
+-SRC_DIRS := src src/engine src/game src/audio src/menu src/buffers actors levels bin bin/$(VERSION) data assets src/pc src/pc/gfx src/pc/audio src/pc/controller src/pc/fs
++SRC_DIRS := src src/engine src/game src/audio src/menu src/buffers actors levels bin bin/$(VERSION) data assets src/pc src/pc/gfx src/pc/audio src/pc/controller src/pc/fs src/sgi src/sgi/utils
+ SRC_DIRS := $(addprefix $(LOCAL_PATH)/,$(SRC_DIRS))
+ 
+ GODDARD_SRC_DIRS := src/goddard src/goddard/dynlists
+@@ -76,7 +76,7 @@ ULTRA_C_FILES := $(addprefix $(LOCAL_PATH)/lib/src/,$(ULTRA_C_FILES))
+ 
+ GODDARD_C_FILES := $(foreach dir,$(GODDARD_SRC_DIRS),$(wildcard $(dir)/*.c))
+ 
+-GENERATED_C_FILES := $(PC_BUILD_DIR)/assets/mario_anim_data.c $(PC_BUILD_DIR)/assets/demo_data.c \
++GENERATED_C_FILES := $(PC_BUILD_DIR)/assets/mario_anim_data.c $(PC_BUILD_DIR)/assets/luigi_anim_data.c $(PC_BUILD_DIR)/assets/demo_data.c \
+   $(addprefix $(PC_BUILD_DIR)/bin/,$(addsuffix _skybox.c,$(notdir $(basename $(wildcard $(LOCAL_PATH)/textures/skyboxes/*.png)))))
+ 
+ LOCAL_SHORT_COMMANDS := true
+diff --git a/Makefile b/Makefile
+index c1bd1ae..0de610e 100644
+--- a/Makefile
++++ b/Makefile
+@@ -34,6 +34,7 @@ OSX_BUILD ?= 0
+ TARGET_ARCH ?= native
+ TARGET_BITS ?= 0
+ 
++TOUCH_CONTROLS ?= 1
+ # Disable better camera by default
+ BETTERCAMERA ?= 0
+ # Disable no drawing distance by default
+@@ -89,6 +90,13 @@ endif
+ ifeq ($(TARGET_WEB),0)
+   ifeq ($(HOST_OS),Windows)
+     WINDOWS_BUILD := 1
++  else
++    ifneq ($(shell which termux-setup-storage),)
++      TARGET_ANDROID := 1
++      ifeq ($(shell dpkg -s apksigner | grep Version | sed "s/Version: //"),0.7-2)
++        OLD_APKSIGNER := 1
++      endif
++    endif
+   endif
+ endif
+ 
+@@ -193,6 +201,10 @@ ifeq ($(TARGET_RPI),1) # Define RPi to change SDL2 title & GLES2 hints
+       VERSION_CFLAGS += -DUSE_GLES
+ endif
+ 
++ifeq ($(TARGET_ANDROID),1)
++      VERSION_CFLAGS += -DUSE_GLES
++endif
++
+ ifeq ($(OSX_BUILD),1) # Modify GFX & SDL2 for OSX GL
+      VERSION_CFLAGS += -DOSX_BUILD
+ endif
+@@ -265,12 +277,17 @@ EXE := $(BUILD_DIR)/$(TARGET).html
+ 	else
+ 	ifeq ($(WINDOWS_BUILD),1)
+ 		EXE := $(BUILD_DIR)/$(TARGET).exe
+-
+-		else # Linux builds/binary namer
+-		ifeq ($(TARGET_RPI),1)
+-			EXE := $(BUILD_DIR)/$(TARGET).arm
+ 		else
+-			EXE := $(BUILD_DIR)/$(TARGET)
++		ifeq ($(TARGET_ANDROID),1)
++			EXE := $(BUILD_DIR)/libmain.so
++			APK := $(BUILD_DIR)/$(TARGET).unsigned.apk
++			APK_SIGNED := $(BUILD_DIR)/$(TARGET).apk
++			else # Linux builds/binary namer
++			ifeq ($(TARGET_RPI),1)
++				EXE := $(BUILD_DIR)/$(TARGET).arm
++				else
++				EXE := $(BUILD_DIR)/$(TARGET)
++			endif
+ 		endif
+ 	endif
+ endif
+@@ -429,6 +446,9 @@ SEG_FILES := $(SEGMENT_ELF_FILES) $(ACTOR_ELF_FILES) $(LEVEL_ELF_FILES)
+ 
+ ##################### Compiler Options #######################
+ INCLUDE_CFLAGS := -I include -I $(BUILD_DIR) -I $(BUILD_DIR)/include -I src -I .
++ifeq ($(TARGET_ANDROID),1)
++INCLUDE_CFLAGS += -I SDL/include
++endif
+ ENDIAN_BITWIDTH := $(BUILD_DIR)/endian-and-bitwidth
+ 
+ # Huge deleted N64 section was here
+@@ -497,6 +517,8 @@ ifeq ($(WINDOW_API),DXGI)
+ else ifeq ($(WINDOW_API),SDL2)
+   ifeq ($(WINDOWS_BUILD),1)
+     BACKEND_LDFLAGS += -lglew32 -lglu32 -lopengl32
++  else ifeq ($(TARGET_ANDROID),1)
++    BACKEND_LDFLAGS += -lGLESv2
+   else ifeq ($(TARGET_RPI),1)
+     BACKEND_LDFLAGS += -lGLESv2
+   else ifeq ($(OSX_BUILD),1)
+@@ -517,11 +539,16 @@ endif
+ 
+ # SDL can be used by different systems, so we consolidate all of that shit into this
+ ifeq ($(SDL_USED),2)
+-  BACKEND_CFLAGS += -DHAVE_SDL2=1 `$(SDLCONFIG) --cflags`
+-  ifeq ($(WINDOWS_BUILD),1)
+-    BACKEND_LDFLAGS += `$(SDLCONFIG) --static-libs` -lsetupapi -luser32 -limm32 -lole32 -loleaut32 -lshell32 -lwinmm -lversion
++  ifeq ($(TARGET_ANDROID),1)
++    BACKEND_CFLAGS += -DHAVE_SDL2=1 
++    BACKEND_LDFLAGS += -lhidapi -lSDL2
+   else
+-    BACKEND_LDFLAGS += `$(SDLCONFIG) --libs`
++    BACKEND_CFLAGS += -DHAVE_SDL2=1 `$(SDLCONFIG) --cflags`
++    ifeq ($(WINDOWS_BUILD),1)
++      BACKEND_LDFLAGS += `$(SDLCONFIG) --static-libs` -lsetupapi -luser32 -limm32 -lole32 -loleaut32 -lshell32 -lwinmm -lversion
++    else
++      BACKEND_LDFLAGS += `$(SDLCONFIG) --libs`
++    endif
+   endif
+ endif
+ 
+@@ -541,6 +568,10 @@ else
+ endif
+ 
+ # Check for enhancement options
++ifeq ($(TOUCH_CONTROLS),1)
++  CC_CHECK += -DTOUCH_CONTROLS
++  CFLAGS += -DTOUCH_CONTROLS
++endif
+ 
+ # Check for Puppycam option
+ ifeq ($(BETTERCAMERA),1)
+@@ -622,6 +653,19 @@ else ifeq ($(WINDOWS_BUILD),1)
+ else ifeq ($(TARGET_RPI),1)
+   LDFLAGS := $(OPT_FLAGS) -lm $(BACKEND_LDFLAGS) -no-pie
+ 
++else ifeq ($(TARGET_ANDROID),1)
++  ifneq ($(shell uname -m | grep "i.86"),)
++    ARCH_APK := x86
++  else ifeq ($(shell uname -m),x86_64)
++    ARCH_APK := x86_64
++  else ifeq ($(shell getconf LONG_BIT),64)
++    ARCH_APK := arm64-v8a
++  else
++    ARCH_APK := armeabi-v7a
++  endif
++  CFLAGS  += -fPIC
++  LDFLAGS := -L./android/lib/$(ARCH_APK)/ -lm $(BACKEND_LDFLAGS) -shared
++
+ else ifeq ($(OSX_BUILD),1)
+   LDFLAGS := -lm $(BACKEND_LDFLAGS) -no-pie -lpthread
+ 
+@@ -662,7 +706,13 @@ ZEROTERM = $(PYTHON) $(TOOLS_DIR)/zeroterm.py
+ 
+ ######################## Targets #############################
+ 
++ifeq ($(TARGET_ANDROID),1)
++all: $(APK_SIGNED)
++EXE_DEPEND := $(APK_SIGNED)
++else
+ all: $(EXE)
++EXE_DEPEND := $(EXE)
++endif
+ 
+ # thank you apple very cool
+ ifeq ($(HOST_OS),Darwin)
+@@ -673,7 +723,7 @@ endif
+ 
+ ifeq ($(EXTERNAL_DATA),1)
+ 
+-BASEPACK_PATH := $(BUILD_DIR)/$(BASEDIR)/
++BASEPACK_PATH := $(BUILD_DIR)/$(BASEDIR)/base.zip
+ BASEPACK_LST := $(BUILD_DIR)/basepack.lst
+ 
+ # depend on resources as well
+@@ -683,7 +733,7 @@ all: $(BASEPACK_PATH)
+ res: $(BASEPACK_PATH)
+ 
+ # prepares the basepack.lst
+-$(BASEPACK_LST): $(EXE)
++$(BASEPACK_LST): $(EXE_DEPEND)
+ 	@mkdir -p $(BUILD_DIR)/$(BASEDIR)
+ 	@echo -n > $(BASEPACK_LST)
+ 	@echo "$(BUILD_DIR)/sound/bank_sets sound/bank_sets" >> $(BASEPACK_LST)
+@@ -976,6 +1026,26 @@ $(BUILD_DIR)/%.o: %.s
+ 	$(AS) $(ASFLAGS) -MD $(BUILD_DIR)/$*.d -o $@ $<
+ 
+ 
++ifeq ($(TARGET_ANDROID),1)
++APK_FILES := $(shell find android/ -type f)
++
++$(APK): $(EXE) $(APK_FILES)
++	cp -r android $(BUILD_DIR) && \
++	cp $(EXE) $(BUILD_DIR)/android/lib/$(ARCH_APK)/ && \
++	cd $(BUILD_DIR)/android && \
++	zip -r ../../../$@ ./* && \
++	cd ../../.. && \
++	rm -rf $(BUILD_DIR)/android
++
++ifeq ($(OLD_APKSIGNER),1)
++$(APK_SIGNED): $(APK)
++	apksigner $(BUILD_DIR)/keystore $< $@
++else
++$(APK_SIGNED): $(APK)
++	cp $< $@
++	apksigner sign --cert certificate.pem --key key.pk8 $@
++endif
++endif
+ 
+ $(EXE): $(O_FILES) $(MIO0_FILES:.mio0=.o) $(SOUND_OBJ_FILES) $(ULTRA_O_FILES) $(GODDARD_O_FILES) $(BUILD_DIR)/$(RPC_LIBS)
+ 	$(LD) -L $(BUILD_DIR) -o $@ $(O_FILES) $(SOUND_OBJ_FILES) $(ULTRA_O_FILES) $(GODDARD_O_FILES) $(LDFLAGS)
+diff --git a/Makefile.split b/Makefile.split
+index 7657f4f..7e7168e 100644
+--- a/Makefile.split
++++ b/Makefile.split
+@@ -5,7 +5,7 @@
+ # obtain a list of segments from the *.c files in bin directory
+ SEGMENTS := $(notdir $(basename $(wildcard bin/*.c))) $(addprefix $(VERSION)/,$(notdir $(basename $(wildcard bin/$(VERSION)/*.c)))) $(addsuffix _skybox,$(notdir $(basename $(wildcard textures/skyboxes/*.png))))
+ ACTORS := $(filter %/,$(wildcard actors/*/))
+-TEXTURE_DIRS := $(addprefix textures/,$(SEGMENTS)) $(ACTORS) textures/crash_screen textures/intro_raw textures/ipl3_raw textures/skybox_tiles
++TEXTURE_DIRS := $(addprefix textures/,$(SEGMENTS)) $(ACTORS) textures/crash_screen textures/intro_raw textures/ipl3_raw textures/skybox_tiles textures/touchcontrols
+ 
+ # NOTE: textures assume naming convention "texture.<encoding>.png" generates "texture.<encoding>"
+ 
+@@ -189,6 +189,7 @@ SKY_FILES                    := $(patsubst %.png,%.inc.c,$(wildcard $(TEXTURE_DI
+ MACHINE_FILES                := $(patsubst %.png,%.inc.c,$(wildcard $(TEXTURE_DIR)/machine/*.png))
+ MOUNTAIN_FILES               := $(patsubst %.png,%.inc.c,$(wildcard $(TEXTURE_DIR)/mountain/*.png))
+ GRASS_FILES                  := $(patsubst %.png,%.inc.c,$(wildcard $(TEXTURE_DIR)/grass/*.png))
++TOUCH_FILES                  := $(patsubst %.png,%.inc.c,$(wildcard $(TEXTURE_DIR)/touchcontrols/*.png))
+ 
+ # Texture Files
+ $(BUILD_DIR)/bin/segment2.o: $(addprefix $(BUILD_DIR)/,$(SEGMENT2_FILES))
+@@ -206,6 +207,7 @@ $(BUILD_DIR)/bin/sky.o: $(addprefix $(BUILD_DIR)/,$(SKY_FILES))
+ $(BUILD_DIR)/bin/machine.o: $(addprefix $(BUILD_DIR)/,$(MACHINE_FILES))
+ $(BUILD_DIR)/bin/mountain.o: $(addprefix $(BUILD_DIR)/,$(MOUNTAIN_FILES))
+ $(BUILD_DIR)/bin/grass.o: $(addprefix $(BUILD_DIR)/,$(GRASS_FILES))
++$(BUILD_DIR)/src/pc/controller/controller_touchscreen.o: $(addprefix $(BUILD_DIR)/,$(TOUCH_FILES))
+ 
+ # Others
+ $(BUILD_DIR)/bin/segment2.elf: SEGMENT_ADDRESS := 0x02000000
+diff --git a/src/engine/level_script.c b/src/engine/level_script.c
+index 7de998e..568a2a3 100644
+--- a/src/engine/level_script.c
++++ b/src/engine/level_script.c
+@@ -860,6 +860,10 @@ static void (*LevelScriptJumpTable[])(void) = {
+     /*3E*/ level_cmd_cleardemoptr,
+ };
+ 
++#ifdef TOUCH_CONTROLS
++extern void render_touch_controls(void);
++#endif
++
+ struct LevelCommand *level_script_execute(struct LevelCommand *cmd) {
+     sScriptStatus = SCRIPT_RUNNING;
+     sCurrentCmd = cmd;
+@@ -871,6 +875,9 @@ struct LevelCommand *level_script_execute(struct LevelCommand *cmd) {
+     profiler_log_thread5_time(LEVEL_SCRIPT_EXECUTE);
+     init_render_image();
+     render_game();
++#ifdef TOUCH_CONTROLS
++    render_touch_controls();
++#endif
+     end_master_display_list();
+     alloc_display_list(0);
+ 
+diff --git a/src/game/behavior_actions.c b/src/game/behavior_actions.c
+index b40408b..5ff7bc5 100644
+--- a/src/game/behavior_actions.c
++++ b/src/game/behavior_actions.c
+@@ -43,6 +43,7 @@
+ #include "spawn_object.h"
+ #include "spawn_sound.h"
+ #include "thread6.h"
++#include "src/sgi/utils/characters.h"
+ 
+ #define o gCurrentObject
+ 
